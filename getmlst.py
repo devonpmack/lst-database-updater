@@ -13,10 +13,16 @@ All rights reserved.
 
 from argparse import ArgumentParser
 import xml.dom.minidom as xml
-import urllib2 as url
+try:
+    import urllib2 as url
+except ImportError:
+    import urllib.request as url
 import re
 import os
-from urlparse import urlparse
+try:
+    from urlparse import urlparse as urlparse
+except ImportError:
+    from urllib.parse import urlparse as urlparse
 
 '''
 Download MLST datasets from this site: http://pubmlst.org/data/ by
@@ -174,7 +180,7 @@ def main(args):
     log_file.write("sourced from: {}\n\n".format(species_info.profiles_url))
     profile_doc = url.urlopen(species_info.profiles_url)
     profile_file = open('{}/{}'.format(args.path, profile_filename), 'w')
-    profile_file.write(profile_doc.read())
+    profile_file.write(str(profile_doc.read()))
     profile_file.close()
     profile_doc.close()
     for locus in species_info.loci:
@@ -186,8 +192,8 @@ def main(args):
         locus_doc = url.urlopen(locus.url)
         locus_file = open('{}/{}'.format(args.path, locus_filename), 'w')
         locus_fasta_content = locus_doc.read()
-        locus_file.write(locus_fasta_content)
-        species_all_fasta_file.write(locus_fasta_content)
+        locus_file.write(str(locus_fasta_content))
+        species_all_fasta_file.write(str(locus_fasta_content))
         locus_file.close()
         locus_doc.close()
     log_file.write("all loci: {}\n".format(species_all_fasta_filename))

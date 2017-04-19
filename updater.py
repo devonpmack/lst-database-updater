@@ -18,11 +18,11 @@ class UpdateDatabase(object):
     def main(self):
         """Main Program, updates the database"""
         print("Main")
-        self.getrmlsthelper(time.time())
-        loader = SaveLoad()
-        loader.load("bacteria.json")
+        start_time = time.time()
+        self.getrmlsthelper(start_time)
 
-        self.getmlsthelper(time.time())
+        for organism in self.loader.to_update:
+            self.getmlsthelper(start_time, organism)
 
     def getrmlsthelper(self, start):
         """
@@ -45,7 +45,7 @@ class UpdateDatabase(object):
         newfolder = '{}{}/{}'.format(self.referencefilepath, self.analysistype, d1)
         # System call
         rmlstupdatecall = 'cd {} && perl {}/rest_auth.pl -a {}/secret.txt'.format(newfolder, homepath, homepath)
-        if delta.days > 7 or foldersize < 100:
+        if foldersize < 100:
             printtime("Last update of rMLST profile and alleles was {} days ago. Updating".format(str(delta.days)),
                       start)
             # Create the path
@@ -81,16 +81,10 @@ class UpdateDatabase(object):
         # Allow for Shigella to use the Escherichia MLST profile/alleles
         organism = organism if organism != 'Shigella' else 'Escherichia'
         # As there are multiple profiles for certain organisms, this dictionary has the schemes I use as values
-        organismdictionary = {'Escherichia': 'Escherichia coli#1',
-                              'Shigella': 'Escherichia coli#1',
-                              'Vibrio': 'Vibrio parahaemolyticus',
-                              'Campylobacter': 'Campylobacter jejuni',
-                              'Listeria': 'Listeria monocytogenes',
-                              'Bacillus': 'Bacillus cereus',
-                              'Klebsiella': 'Klebsiella pneumoniae'}
+
         # Allow for a genus not in the dictionary being specified
         try:
-            organismset.add(organismdictionary[organism])
+            organismset.add(self.loader.organismdictionary[organism])
         except KeyError:
             # Add the organism to the set
             organismset.add(organism)
@@ -209,6 +203,30 @@ class UpdateDatabase(object):
         # self.referencefilepath = "/mnt/nas/Adam/assemblypipeline/rMLST/"
         self.referencefilepath = os.path.join(parser.referencedirectory, "")
         self.start = parser.start
+        self.loader = SaveLoad()
+
+        # If the file was empty and it couldn't load but created the file
+        import json
+        try:
+            # Fresh file
+            if not self.loader.load("bacteria.json", True):
+                self.loader.organismdictionary = {'Escherichia': 'Escherichia coli#1',
+                                                  'Shigella': 'Escherichia coli#1',
+                                                  'Vibrio': 'Vibrio parahaemolyticus',
+                                                  'Campylobacter': 'Campylobacter jejuni',
+                                                  'Listeria': 'Listeria monocytogenes',
+                                                  'Bacillus': 'Bacillus cereus',
+                                                  'Klebsiella': 'Klebsiella pneumoniae'}
+                self.loader.to_update = list(self.loader.organismdictionary.keys())
+                self.loader.dump("bacteria.json")
+
+            if "organismdictionary" not in self.loader.__dict__:
+                raise NameError
+
+        except (json.decoder.JSONDecodeError, NameError):
+            print("Invalid config file, please delete or fix")
+            sys.exit(1)
+
         self.main()
 
 if __name__ == '__main__':
@@ -219,6 +237,9 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--referencedirectory',
                         required=True,
                         help='ref dir')
+    parser.add_argument('-u', '--to_update',
+                        required=False,
+                        help='Comma separated list of bacteria to update')
     args = parser.parse_args()
     args.start = time.time()
     UpdateDatabase(args)
