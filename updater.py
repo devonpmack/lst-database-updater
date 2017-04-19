@@ -3,67 +3,79 @@ import subprocess
 import urllib.request
 import time
 import os
+import shutil
+from Bio import SeqIO
 import logging
 import sys
-import argparse
+
 import configparser
+from glob import glob
+import getmlst
+from accessoryfunctions.accessoryFunctions import *
+from pyaccessories.SaveLoad import SaveLoad
 
 class UpdateDatabase(object):
     def main(self):
         """Main Program, updates the database"""
         print("Main")
+        self.getrmlsthelper(time.time())
+        loader = SaveLoad()
+        loader.load("bacteria.json")
 
-    def getrmlsthelper(self, referencefilepath, update, start):
+        self.getmlsthelper(time.time())
+
+    def getrmlsthelper(self, start):
         """
         Makes a system call to rest_auth.pl, a Perl script modified from
         https://github.com/kjolley/BIGSdb/tree/develop/scripts/test
         And downloads the most up-to-date rMLST profile and alleles
         """
         from subprocess import call
-        analysistype = 'rMLST'
         # Folders are named based on the download date e.g 2016-04-26
         # Find all folders (with the trailing / in the glob search) and remove the trailing /
-        lastfolder = sorted(glob('{}{}/2*/'.format(referencefilepath, analysistype)))[-1].rstrip('/')
-        delta, foldersize, d1 = schemedate(lastfolder)
+        try:
+            lastfolder = sorted(glob('{}{}/2*/'.format(self.referencefilepath, self.analysistype)))[-1].rstrip('/')
+        except IndexError:
+            lastfolder = "2000-01-01"
+
+        delta, foldersize, d1 = self.schemedate(lastfolder)
         # Extract the path of the current script from the full path + file name
         homepath = os.path.split(os.path.abspath(__file__))[0]
         # Set the path/name of the folder to contain the new alleles and profile
-        newfolder = '{}{}/{}'.format(referencefilepath, analysistype, d1)
+        newfolder = '{}{}/{}'.format(self.referencefilepath, self.analysistype, d1)
         # System call
         rmlstupdatecall = 'cd {} && perl {}/rest_auth.pl -a {}/secret.txt'.format(newfolder, homepath, homepath)
-        if update:
-            if delta.days > 7 or foldersize < 100:
-                printtime("Last update of rMLST profile and alleles was {} days ago. Updating".format(str(delta.days)),
-                          start)
-                # Create the path
-                make_path(newfolder)
-                # Copy over the access token to be used in the authentication
-                shutil.copyfile('{}/access_token'.format(homepath), '{}/access_token'.format(newfolder))
-                # Run rest_auth.pl
-                call(rmlstupdatecall, shell=True)
-                # Get the new alleles into a list, and create the combinedAlleles file
-                alleles = glob('{}/*.tfa'.format(newfolder))
-                combinealleles(start, newfolder, alleles)
-            # If the profile and alleles are up-to-date, set :newfolder to :lastfolder
-            else:
-                newfolder = lastfolder
-            # Ensure that the profile/alleles updated successfully
-            # Calculate the size of the folder by adding the sizes of all the files within the folder together
-            newfoldersize = sum(os.path.getsize('{}/{}'.format(newfolder, f)) for f in os.listdir(newfolder)
-                                if os.path.isfile('{}/{}'.format(newfolder, f)))
-            # If the profile/allele failed, remove the folder, and use the most recent update
-            if newfoldersize < 100:
-                shutil.rmtree(newfolder)
-                newfolder = sorted(glob('{}{}/*/'.format(referencefilepath, analysistype)))[-1].rstrip('/')
-        # Don't update the profile/alleles if not requested
+        if delta.days > 7 or foldersize < 100:
+            printtime("Last update of rMLST profile and alleles was {} days ago. Updating".format(str(delta.days)),
+                      start)
+            # Create the path
+            make_path(newfolder)
+            # Copy over the access token to be used in the authentication
+            shutil.copyfile('{}/access_token'.format(homepath), '{}/access_token'.format(newfolder))
+            # Run rest_auth.pl
+            call(rmlstupdatecall, shell=True)
+            # Get the new alleles into a list, and create the combinedAlleles file
+            alleles = glob('{}/*.tfa'.format(newfolder))
+            self.combinealleles(start, newfolder, alleles)
+        # If the profile and alleles are up-to-date, set :newfolder to :lastfolder
         else:
             newfolder = lastfolder
+        # Ensure that the profile/alleles updated successfully
+        # Calculate the size of the folder by adding the sizes of all the files within the folder together
+        newfoldersize = sum(os.path.getsize('{}/{}'.format(newfolder, f)) for f in os.listdir(newfolder)
+                            if os.path.isfile('{}/{}'.format(newfolder, f)))
+        # If the profile/allele failed, remove the folder, and use the most recent update
+        if newfoldersize < 100:
+            shutil.rmtree(newfolder)
+            try:
+                newfolder = sorted(glob('{}{}/*/'.format(self.referencefilepath, self.analysistype)))[-1].rstrip('/')
+            except IndexError:
+                pass
         # Return the system call and the folder containing the profile and alleles
         return rmlstupdatecall, newfolder
 
-    def getmlsthelper(self, referencefilepath, start, organism, update):
+    def getmlsthelper(self, start, organism):
         """Prepares to run the getmlst.py script provided in SRST2"""
-        from accessoryFunctions import GenObject
         # Initialise a set to for the organism(s) for which new alleles and profiles are desired
         organismset = set()
         # Allow for Shigella to use the Escherichia MLST profile/alleles
@@ -83,46 +95,44 @@ class UpdateDatabase(object):
             # Add the organism to the set
             organismset.add(organism)
         for scheme in organismset:
-            organismpath = os.path.join(referencefilepath, 'MLST', organism)
+            organismpath = os.path.join(self.referencefilepath, 'MLST', organism)
             # Find all folders (with the trailing / in the glob search) and remove the trailing /
             try:
                 lastfolder = sorted(glob('{}/*/'.format(organismpath)))[-1].rstrip('/')
             except IndexError:
                 lastfolder = []
             # Run the method to determine the most recent folder, and how recently it was updated
-            delta, foldersize, d1 = schemedate(lastfolder)
+            delta, foldersize, d1 = self.schemedate(lastfolder)
             # Set the path/name of the folder to contain the new alleles and profile
             newfolder = '{}/{}'.format(organismpath, d1)
-            if update:
-                if delta.days > 7 or foldersize < 100:
-                    printtime('Downloading {} MLST scheme from pubmlst.org'.format(organism), start)
-                    # Create the object to store the argument attributes to feed to getmlst
-                    getmlstargs = GenObject()
-                    getmlstargs.species = scheme
-                    getmlstargs.repository_url = 'http://pubmlst.org/data/dbases.xml'
-                    getmlstargs.force_scheme_name = False
-                    getmlstargs.path = newfolder
-                    # Create the path to store the downloaded
-                    make_path(getmlstargs.path)
-                    getmlst.main(getmlstargs)
-                    # Even if there is an issue contacting the database, files are created, however, they are populated
-                    # with XML strings indicating that the download failed
-                    # Read the first character in the file
-                    try:
-                        profilestart = open(glob('{}/*.txt'.format(newfolder))[0]).readline()
-                    except IndexError:
-                        profilestart = []
-                    # If it is a <, then the download failed
-                    if not profilestart or profilestart[0] == '<':
-                        # Delete the folder, and use the previous definitions instead
-                        shutil.rmtree(newfolder)
-                        newfolder = lastfolder
-                # If the profile and alleles are up-to-date, set :newfolder to :lastfolder
-                else:
+
+            if foldersize < 100:
+                printtime('Downloading {} MLST scheme from pubmlst.org'.format(organism), start)
+                # Create the object to store the argument attributes to feed to getmlst
+                getmlstargs = GenObject()
+                getmlstargs.species = scheme
+                getmlstargs.repository_url = 'http://pubmlst.org/data/dbases.xml'
+                getmlstargs.force_scheme_name = False
+                getmlstargs.path = newfolder
+                # Create the path to store the downloaded
+                make_path(getmlstargs.path)
+                getmlst.main(getmlstargs)
+                # Even if there is an issue contacting the database, files are created, however, they are populated
+                # with XML strings indicating that the download failed
+                # Read the first character in the file
+                try:
+                    profilestart = open(glob('{}/*.txt'.format(newfolder))[0]).readline()
+                except IndexError:
+                    profilestart = []
+                # If it is a <, then the download failed
+                if not profilestart or profilestart[0] == '<':
+                    # Delete the folder, and use the previous definitions instead
+                    shutil.rmtree(newfolder)
                     newfolder = lastfolder
-            # If update isn't specified, don't update
+            # If the profile and alleles are up-to-date, set :newfolder to :lastfolder
             else:
                 newfolder = lastfolder
+            # If update isn't specified, don't update
                 # Ensure that the profile/alleles updated successfully
                 # Calculate the size of the folder by adding the sizes of all the files within the folder together
             try:
@@ -140,8 +150,75 @@ class UpdateDatabase(object):
             # Return the name/path of the allele-containing folder
             return newfolder
 
-    def __init__(self):
+    @staticmethod
+    def combinealleles(start, allelepath, alleles):
+        printtime('Creating combined rMLST allele file', start)
+        records = []
+
+        # Open each allele file
+        for allele in sorted(alleles):
+            # with open(allele, 'rU') as fasta:
+            for record in SeqIO.parse(open(allele, "rU"), "fasta"):
+                # Extract the sequence record from each entry in the multifasta
+                # Replace and dashes in the record.id with underscores
+                record.id = record.id.replace('-', '_')
+                # Remove and dashes or 'N's from the sequence data - makeblastdb can't handle sequences
+                # with gaps
+                # noinspection PyProtectedMember
+                record.seq._data = record.seq._data.replace('-', '').replace('N', '')
+                # Clear the name and description attributes of the record
+                record.name = ''
+                record.description = ''
+                # Write each record to the combined file
+                # SeqIO.write(record, combinedfile, 'fasta')
+                records.append(record)
+        with open('{}/rMLST_combined.fasta'.format(allelepath), 'w') as combinedfile:
+            SeqIO.write(records, combinedfile, 'fasta')
+
+    def schemedate(self, lastfolder):
+        from datetime import date
+        try:
+            # Extract the folder name (date) from the path/name
+            lastupdate = os.path.split(lastfolder)[1]
+        except AttributeError:
+            lastupdate = '2000-01-01'
+        try:
+            # Calculate the size of the folder by adding the sizes of all the files within the folder together
+            foldersize = sum(os.path.getsize('{}/{}'.format(lastfolder, f)) for f in os.listdir(lastfolder)
+                             if os.path.isfile('{}/{}'.format(lastfolder, f)))
+        except (TypeError, FileNotFoundError):
+            foldersize = 0
+        # Try to figure out the year, month, and day from the folder name
+        try:
+            (year, month, day) = lastupdate.split("-")
+            # Create a date object variable with the year, month, and day
+            d0 = date(int(year), int(month), int(day))
+        except ValueError:
+            # Set an arbitrary date in the past to force an update
+            d0 = date(2000, 1, 1)
+        # Create a date object with the current date
+        d1 = date(int(time.strftime("%Y")), int(time.strftime("%m")), int(time.strftime("%d")))
+        # Subtract the last update date from the current date
+        delta = d1 - d0
+
+        return delta, foldersize, d1
+
+    def __init__(self, parser):
         print("initialising")
+        self.analysistype = "rMLST"
+        # self.referencefilepath = "/mnt/nas/Adam/assemblypipeline/rMLST/"
+        self.referencefilepath = os.path.join(parser.referencedirectory, "")
+        self.start = parser.start
+        self.main()
 
 if __name__ == '__main__':
-    UpdateDatabase()
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser(description="descr")
+
+    parser.add_argument('-r', '--referencedirectory',
+                        required=True,
+                        help='ref dir')
+    args = parser.parse_args()
+    args.start = time.time()
+    UpdateDatabase(args)
