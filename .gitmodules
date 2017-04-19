@@ -1,3 +1,6 @@
 [submodule "accessoryfunctions"]
 	path = accessoryfunctions
 	url = https://github.com/adamkoziol/accessoryfunctions.git
+[submodule "pyaccessories"]
+	path = pyaccessories
+	url = https://github.com/devonpmack/pyaccessories.git
